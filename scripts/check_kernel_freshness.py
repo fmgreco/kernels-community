@@ -18,6 +18,7 @@ KERNEL_SOURCE_MAPPING = {
     "finegrained-fp8": "",
     "flash-attn2": "https://github.com/Dao-AILab/flash-attention",
     "flash-attn3": "https://github.com/Dao-AILab/flash-attention",
+    "flash-attn4": "https://github.com/Dao-AILab/flash-attention",
     "flash-mla": "https://github.com/deepseek-ai/FlashMLA",
     "fp8-fbgemm": "https://github.com/pytorch/FBGEMM",
     "gpt-oss-metal-kernels": "https://github.com/openai/gpt-oss",
@@ -35,8 +36,10 @@ KERNEL_SOURCE_MAPPING = {
     "rwkv": "https://github.com/BlinkDL/RWKV-LM",
     "scattermoe": "https://github.com/shawntan/scattermoe",
     "sgl-flash-attn3": "https://github.com/sgl-project/sgl-flash-attn",
+    "sonic-moe": "https://github.com/Dao-AILab/sonic-moe",
     "tinygrad-rms": "https://github.com/tinygrad/tinygrad",
     "trimul-gpumode": "https://github.com/davidberard98/gpumode-trimul",
+    "triton-kernels": "https://github.com/triton-lang/triton.git",
     "vllm-flash-attn3": "https://github.com/Dao-AILab/flash-attention",
     "yoso": "https://github.com/mlpen/YOSO",
     "cv-utils": "",
@@ -46,6 +49,7 @@ KERNEL_SOURCE_MAPPING = {
     "mlx-quantization-metal-kernels": "https://github.com/ml-explore/mlx",
     "mlx-rmsnorm": "https://github.com/ml-explore/mlx",
     "sage-attention": "https://github.com/thu-ml/SageAttention",
+    "deep-gemm": "https://github.com/deepseek-ai/DeepGEMM",
     "bitsandbytes-mps": "",
 
 }

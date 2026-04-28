@@ -1,9 +1,21 @@
 name: Build Release (Windows)
+run-name: >-
+  Build Release (Windows) / ${{ inputs.kernel_name || '' }} / request=${{ inputs.dispatch_key || '' }}
 on:
   pull_request:
     types: [closed]
     paths-ignore:
       - "**/README.md"
+  workflow_dispatch:
+    inputs:
+      kernel_name:
+        description: "Kernel directory name to build"
+        required: true
+        type: string
+      dispatch_key:
+        description: "Unique key for matching this run back to a bot dispatch"
+        required: false
+        type: string
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
@@ -11,12 +23,11 @@ concurrency:
 
 jobs:
   build-kernel:
-    # Only run if the PR was actually merged (not just closed)
-    if: github.event.pull_request.merged == true
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     strategy:
       matrix:
         os: [windows-2022]
-        python: [3.11, 3.12]
+        python: [3.12]
         platform: [
             # CUDA platforms
             # { backend: 'cuda', torch_version: '2.9.1', cuda: '12.6.3', wheel: '126' },
@@ -44,15 +55,27 @@ jobs:
         id: validate
         shell: pwsh
         env:
-          PRTITLE: ${{ github.event.pull_request.title }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
-          $KERNEL = python .github/workflows/validate-kernel-pr.py "release" "$Env:PRTITLE"
-          if ($LASTEXITCODE -eq 0) {
-            echo "kernel=$KERNEL" >> $env:GITHUB_OUTPUT
-            echo "skip=false" >> $env:GITHUB_OUTPUT
+          $ErrorActionPreference = "Continue"
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $KERNEL = "${{ inputs.kernel_name }}"
+            if ((Test-Path "$KERNEL") -and (Test-Path "$KERNEL/flake.nix") -and (Test-Path "$KERNEL/build.toml")) {
+              echo "kernel=$KERNEL" >> $env:GITHUB_OUTPUT
+              echo "skip=false" >> $env:GITHUB_OUTPUT
+            } else {
+              echo "skip=true" >> $env:GITHUB_OUTPUT
+            }
           } else {
-            echo "skip=true" >> $env:GITHUB_OUTPUT
+            $KERNEL = python .github/workflows/validate-kernel-pr.py "release" 2>&1
+            if ($LASTEXITCODE -eq 0) {
+              echo "kernel=$KERNEL" >> $env:GITHUB_OUTPUT
+              echo "skip=false" >> $env:GITHUB_OUTPUT
+            } else {
+              echo "skip=true" >> $env:GITHUB_OUTPUT
+            }
           }
+          exit 0
 
       - name: Check backend support
         id: check-backend
@@ -154,16 +177,16 @@ jobs:
         uses: actions/cache@v5
         with:
           path: |
-            kernels/build2cmake/target
+            kernels/kernel-builder/target
             ~/.cargo/registry
             ~/.cargo/git
-          key: ${{ runner.os }}-rust-debug-${{ hashFiles('kernels/build2cmake/Cargo.lock') }}
+          key: ${{ runner.os }}-rust-debug-${{ hashFiles('kernels/kernel-builder/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-rust-debug-
 
-      - name: Build build2cmake
+      - name: Build kernel-builder
         if: steps.validate.outputs.skip == 'false' && steps.check-backend.outputs.supported == 'true'
-        working-directory: kernels\build2cmake
+        working-directory: kernels\kernel-builder
         shell: pwsh
         run: cargo build
 
@@ -180,13 +203,13 @@ jobs:
             $setvarsPath = "C:\Program Files (x86)\Intel\oneAPI\setvars.bat"
             if (Test-Path $setvarsPath) {
               Write-Host "Initializing Intel oneAPI environment for XPU build..." -ForegroundColor Cyan
-              
+
               # Create a temporary file to capture environment variables
               $tempFile = [System.IO.Path]::GetTempFileName()
-              
+
               # Run setvars.bat and capture all environment variables
               cmd.exe /c "`"$setvarsPath`" && set > `"$tempFile`""
-              
+
               # Parse and set each environment variable in PowerShell
               Get-Content $tempFile | ForEach-Object {
                 if ($_ -match "^(.*?)=(.*)$") {
@@ -195,9 +218,9 @@ jobs:
                   [System.Environment]::SetEnvironmentVariable($varName, $varValue, [System.EnvironmentVariableTarget]::Process)
                 }
               }
-              
+
               Remove-Item $tempFile -ErrorAction SilentlyContinue
-              
+
               # Verify Intel compiler is now in PATH
               $icxPath = (Get-Command icx-cl -ErrorAction SilentlyContinue).Path
               if ($icxPath) {
@@ -212,7 +235,7 @@ jobs:
               exit 1
             }
           }
-          & "$env:GITHUB_WORKSPACE\kernels\builder\scripts\windows\builder.ps1" -Backend $env:PLATFORM_BACKEND -SourceFolder "$env:KERNEL_SOURCE" -BuildConfig Release -Build
+          & "$env:GITHUB_WORKSPACE\kernels\nix-builder\scripts\windows\builder.ps1" -Backend $env:PLATFORM_BACKEND -SourceFolder "$env:KERNEL_SOURCE" -BuildConfig Release -Build
 
           # Run the local_install target to create the correct directory structure for kernels upload
           # This installs to build/<variant>/<package>/ which is what kernels CLI expects
@@ -226,14 +249,12 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           KERNEL_SOURCE: ${{ steps.validate.outputs.kernel }}
-          PYTHONUTF8: 1
-          PYTHONIOENCODING: utf-8
         run: |
-          # Install kernels package for upload
-          pip install -U kernels --no-cache-dir
+          $KB = "$env:GITHUB_WORKSPACE\kernels\kernel-builder\target\debug\kernel-builder.exe"
 
-          # Upload using the kernels CLI (branchless - uploads to version branch like v1, v2, etc.)
-          kernels upload "$env:KERNEL_SOURCE\build" --repo-id "kernels-community/$env:KERNEL_SOURCE"
+          # Upload to both model and kernel repo types
+          & $KB upload "$env:KERNEL_SOURCE\build" --repo-type model --repo-id "kernels-community/$env:KERNEL_SOURCE"
+          & $KB upload "$env:KERNEL_SOURCE\build" --repo-type kernel --repo-id "kernels-community/$env:KERNEL_SOURCE"
 
       - name: Upload v1 kernels to main
         if: steps.validate.outputs.skip == 'false' && steps.check-backend.outputs.supported == 'true'
@@ -241,18 +262,19 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           KERNEL_SOURCE: ${{ steps.validate.outputs.kernel }}
-          PYTHONUTF8: 1
-          PYTHONIOENCODING: utf-8
         run: |
+          $KB = "$env:GITHUB_WORKSPACE\kernels\kernel-builder\target\debug\kernel-builder.exe"
+
           # Check if build.toml exists and has version = 1
           $buildTomlPath = "$env:KERNEL_SOURCE\build.toml"
           if (Test-Path $buildTomlPath) {
             $content = Get-Content $buildTomlPath -Raw
-            if ($content -match '(?m)^\s*version\s*=\s*1\s*(\r)?$') {
-              Write-Host "Kernel version is 1, uploading to main branch..."
-              kernels upload "$env:KERNEL_SOURCE\build" --repo-id "kernels-community/$env:KERNEL_SOURCE" --branch main
+            if ($content -match '(?m)^\s*version\s*=\s*1\s*(\r)?$' -and $content -notmatch '(?m)^\s*branch\s*=') {
+              Write-Host "Kernel version is 1 and no branch override, uploading to main branch..."
+              & $KB upload "$env:KERNEL_SOURCE\build" --repo-type model --repo-id "kernels-community/$env:KERNEL_SOURCE" --branch main
+              & $KB upload "$env:KERNEL_SOURCE\build" --repo-type kernel --repo-id "kernels-community/$env:KERNEL_SOURCE" --branch main
             } else {
-              Write-Host "Kernel version is not 1, skipping main branch upload"
+              Write-Host "Kernel version is not 1 or branch is overridden, skipping main branch upload"
             }
           } else {
             Write-Host "build.toml not found, skipping main branch upload"

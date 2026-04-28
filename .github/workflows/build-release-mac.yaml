@@ -1,15 +1,26 @@
 name: Build Release (macOS)
+run-name: >-
+  Build Release (macOS) / ${{ inputs.kernel_name || '' }} / request=${{ inputs.dispatch_key || '' }}
 on:
   pull_request:
     types: [closed]
+  workflow_dispatch:
+    inputs:
+      kernel_name:
+        description: "Kernel directory name to build"
+        required: true
+        type: string
+      dispatch_key:
+        description: "Unique key for matching this run back to a bot dispatch"
+        required: false
+        type: string
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 
 jobs:
   build-kernel:
-    # Only run if the PR was actually merged (not just closed)
-    if: github.event.pull_request.merged == true
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v6
@@ -31,22 +42,39 @@ jobs:
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
-          if KERNEL=$(python3 .github/workflows/validate-kernel-pr.py "release" "$PR_TITLE"); then
-            echo "kernel=$KERNEL" >> $GITHUB_OUTPUT
-            echo "skip=false" >> $GITHUB_OUTPUT
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            KERNEL="${{ inputs.kernel_name }}"
+            if [ -d "$KERNEL" ] && [ -f "$KERNEL/flake.nix" ] && [ -f "$KERNEL/build.toml" ]; then
+              echo "kernel=$KERNEL" >> $GITHUB_OUTPUT
+              echo "skip=false" >> $GITHUB_OUTPUT
+            else
+              echo "skip=true" >> $GITHUB_OUTPUT
+            fi
           else
-            echo "skip=true" >> $GITHUB_OUTPUT
+            if KERNEL=$(python3 .github/workflows/validate-kernel-pr.py "release"); then
+              echo "kernel=$KERNEL" >> $GITHUB_OUTPUT
+              echo "skip=false" >> $GITHUB_OUTPUT
+            else
+              echo "skip=true" >> $GITHUB_OUTPUT
+            fi
           fi
       - name: Install Metal toolchain
         if: steps.validate.outputs.skip == 'false'
         run: xcodebuild -downloadComponent MetalToolchain
-      - name: Build and upload kernel
+      - name: Build kernel
+        if: steps.validate.outputs.skip == 'false'
+        run: |
+          KERNEL="${{ steps.validate.outputs.kernel }}"
+          ( cd "$KERNEL" && nix build -L )
+      - name: Upload kernel to Hub
         if: steps.validate.outputs.skip == 'false'
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           KERNEL="${{ steps.validate.outputs.kernel }}"
-          ( cd "$KERNEL" && nix run -L .#build-and-upload )
+          cd "$KERNEL"
+          nix run -L github:huggingface/kernels#kernel-builder -- upload --repo-type model --repo-id "kernels-community/$KERNEL"
+          nix run -L github:huggingface/kernels#kernel-builder -- upload --repo-type kernel --repo-id "kernels-community/$KERNEL"
       - name: Upload v1 kernels to main
         if: steps.validate.outputs.skip == 'false'
         env:
@@ -57,8 +85,9 @@ jobs:
 
           if [ -f "build.toml" ]; then
             VERSION=$(grep -E '^\s*version\s*=\s*1\s*$' build.toml || true)
-            if [ -n "$VERSION" ]; then
-              nix build -L
-              nix run -L .#kernels -- upload --repo-id kernels-community/$KERNEL --branch main result
+            BRANCH=$(grep -E '^\s*branch\s*=' build.toml || true)
+            if [ -n "$VERSION" ] && [ -z "$BRANCH" ]; then
+              nix run -L github:huggingface/kernels#kernel-builder -- upload --repo-type model --repo-id "kernels-community/$KERNEL" --branch main
+              nix run -L github:huggingface/kernels#kernel-builder -- upload --repo-type kernel --repo-id "kernels-community/$KERNEL" --branch main
             fi
           fi

@@ -41,6 +41,10 @@ struct fmha_bwd_args_t {
   bool is_bf16 = false;
   bool deterministic = false;
 
+  // Deterministic mode parameters
+  int nsplits = 1;
+  int dq_accum_split_stride = 0;
+
   // Window size for local attention
   int window_size_left = -1;
   int window_size_right = -1;
@@ -123,6 +127,16 @@ struct bwd_policy_head256 {
   static constexpr int kBlockM = 64;
   static constexpr int kBlockN = 32;
   static constexpr int kHeadDim = 256;
+  static constexpr int kNSGs = 8;
+  static constexpr int AtomLayoutMSdP = 4;
+  static constexpr int AtomLayoutNdKV = 2;
+  static constexpr int AtomLayoutMdQ = 2;
+};
+
+struct bwd_policy_head512 {
+  static constexpr int kBlockM = 64;
+  static constexpr int kBlockN = 32;
+  static constexpr int kHeadDim = 512;
   static constexpr int kNSGs = 8;
   static constexpr int AtomLayoutMSdP = 4;
   static constexpr int AtomLayoutNdKV = 2;

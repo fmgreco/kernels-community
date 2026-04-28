@@ -6,27 +6,27 @@ on:
   workflow_dispatch:
     inputs:
       kernel_name:
-        description: 'Kernel directory to build and upload (e.g. flash-attn3)'
+        description: "Kernel directory to build and upload (e.g. flash-attn3)"
         required: true
       pr_number:
-        description: 'Optional PR number to checkout before building'
+        description: "Optional PR number to checkout before building"
         required: false
-        default: ''
+        default: ""
       target_branch:
-        description: 'Target branch on kernels-community/<kernel> to publish to'
+        description: "Target branch on kernels-community/<kernel> to publish to"
         required: true
       upload:
-        description: 'Whether to upload after build (internal use by kernel-bot)'
+        description: "Whether to upload after build (internal use by kernel-bot)"
         required: false
-        default: 'true'
+        default: "true"
       allow_main_dispatch:
-        description: 'Allow dispatch from default branch without pr_number (internal)'
+        description: "Allow dispatch from default branch without pr_number (internal)"
         required: false
-        default: 'false'
+        default: "false"
       dispatch_key:
-        description: 'Unique request token for correlating workflow runs (internal)'
+        description: "Unique request token for correlating workflow runs (internal)"
         required: false
-        default: 'manual'
+        default: "manual"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
@@ -91,9 +91,16 @@ jobs:
         id: validate
         env:
           KERNEL_INPUT: ${{ inputs.kernel_name }}
+          PR_TITLE: "${{ inputs.kernel_name }}: manual dispatch"
         run: |
           set -eu
-          if KERNEL=$(python3 .github/workflows/validate-kernel-pr.py "release" "${KERNEL_INPUT}: manual dispatch"); then
+          case "$KERNEL_INPUT" in
+            ''|*[!A-Za-z0-9_-]*)
+              echo "Invalid kernel_name: must contain only alphanumeric characters, underscores, and hyphens"
+              exit 1
+              ;;
+          esac
+          if KERNEL=$(python3 .github/workflows/validate-kernel-pr.py "release"); then
             echo "kernel=$KERNEL" >> "$GITHUB_OUTPUT"
           else
             echo "Kernel validation failed."
@@ -106,12 +113,28 @@ jobs:
           KERNEL="${{ steps.validate.outputs.kernel }}"
           ( cd "$KERNEL" && nix run -L .#build-and-copy )
 
+      - name: Validate target branch
+        if: ${{ inputs.upload == 'true' }}
+        id: validate-target-branch
+        env:
+          TARGET_BRANCH: ${{ inputs.target_branch }}
+        run: |
+          set -eu
+          case "$TARGET_BRANCH" in
+            ''|*[!A-Za-z0-9/_-]*)
+              echo "Invalid target_branch: must contain only alphanumeric characters, underscores, hyphens, and slashes"
+              exit 1
+              ;;
+          esac
+          echo "target_branch=$TARGET_BRANCH" >> "$GITHUB_OUTPUT"
+
       - name: Upload kernel
         if: ${{ inputs.upload == 'true' }}
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          TARGET_BRANCH: ${{ inputs.target_branch }}
+          TARGET_BRANCH: ${{ steps.validate-target-branch.outputs.target_branch }}
         run: |
           set -eu
           KERNEL="${{ steps.validate.outputs.kernel }}"
-          ( cd "$KERNEL" && nix run .#kernels -- upload --repo-id "kernels-community/$KERNEL" --branch "$TARGET_BRANCH" . )
+          ( cd "$KERNEL" && nix run github:huggingface/kernels#kernel-builder -- upload --repo-type model --repo-id "kernels-community/$KERNEL" --branch "${TARGET_BRANCH}" . )
+          ( cd "$KERNEL" && nix run github:huggingface/kernels#kernel-builder -- upload --repo-type kernel --repo-id "kernels-community/$KERNEL" --branch "${TARGET_BRANCH}" . )

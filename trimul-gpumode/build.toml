@@ -1,5 +1,7 @@
 [general]
-name = "trimul_gpumode"
+name = "trimul-gpumode"
+# license is best-effort, happy to update if it doesn't match the upstream license
+license = "Apache-2.0"
 version = 1
 backends = [
     "cuda",
@@ -9,6 +11,6 @@ backends = [
 
 
 [general.hub]
-repo-id = "kernels-community/trimul_gpumode"
+repo-id = "kernels-community/trimul-gpumode"
 
 [kernel]

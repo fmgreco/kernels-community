@@ -20,6 +20,7 @@ struct bwd_policy_head128;
 struct bwd_policy_head160;
 struct bwd_policy_head192;
 struct bwd_policy_head256;
+struct bwd_policy_head512;
 
 // Template declarations for different head dimensions
 // IsCausal: 0 = non-causal, 1 = causal
@@ -100,6 +101,16 @@ extern template void bwd_policy_dispatch<bwd_policy_head256, 1, 0>(
 extern template void bwd_policy_dispatch<bwd_policy_head256, 1, 1>(
     sycl::queue&, BwdCutlassType, const fmha_bwd_args_t&);
 
+// Extern template declarations for head512
+extern template void bwd_policy_dispatch<bwd_policy_head512, 0, 0>(
+    sycl::queue&, BwdCutlassType, const fmha_bwd_args_t&);
+extern template void bwd_policy_dispatch<bwd_policy_head512, 0, 1>(
+    sycl::queue&, BwdCutlassType, const fmha_bwd_args_t&);
+extern template void bwd_policy_dispatch<bwd_policy_head512, 1, 0>(
+    sycl::queue&, BwdCutlassType, const fmha_bwd_args_t&);
+extern template void bwd_policy_dispatch<bwd_policy_head512, 1, 1>(
+    sycl::queue&, BwdCutlassType, const fmha_bwd_args_t&);
+
 /**
  * Main backward pass implementation for fixed-length sequences
  * 
@@ -136,4 +147,5 @@ void cutlass_fmha_bwd_fix_impl(
     bool is_local,
     float p_dropout = 0.0f,
     uint64_t philox_seed = 0,
-    uint64_t philox_offset = 0);
+    uint64_t philox_offset = 0,
+    bool deterministic = false);
